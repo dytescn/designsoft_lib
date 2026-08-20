@@ -1,0 +1,11 @@
+{
+  "name": "designsoft",
+  "version": "1.0.0",
+  "description": "designsoft for soft management",
+  "keywords": ["designsoft", "management"],
+  "author": "funxdata",
+  "type": "sys",
+  "exports": {
+      "./target/release/designsoft.dll":"designsoft.dll"
+  }
+}
