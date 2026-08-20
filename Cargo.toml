@@ -1,0 +1,30 @@
+[package]
+name = "designsoft"
+version = "0.1.0"
+edition = "2021"
+
+# 核心：指定编译为 动态库 + C ABI 兼容
+[lib]
+crate-type = ["cdylib", "rlib"]   # 或者 ["cdylib", "lib"]（lib 会生成 rlib 和 dylib）
+name = "designsoft"  
+
+[dependencies]
+chrono = "0.4.45"
+flate2 = "1.1.9"
+# 跨语言类型安全（推荐必装）
+libc = "0.2"             # C 基础类型
+once_cell = "1.19"       # 全局初始化
+serde = { version = "1.0", features = ["derive"] }
+serde_derive = "1.0"
+serde_json = "1.0"
+uuid = { version = "1.23.2", features = ["v4"] }
+regex = "1"
+
+[dependencies.windows]
+version = "0.62.2"
+features = [
+    "Win32_System_Registry",   # 用于 soft 模块
+    "Win32_Foundation",        # 用于错误码等
+    "Win32_System_ProcessStatus",
+    "Win32_System_Threading",
+]
