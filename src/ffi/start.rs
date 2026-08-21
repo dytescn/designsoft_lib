@@ -5,7 +5,7 @@ use serde_json::json;
 use std::ffi::{c_char, c_int, CStr};
 
 #[unsafe(no_mangle)]
-pub extern "C" fn post_software_start(json_in: *const c_char, json_out: *mut c_char) -> c_int {
+pub extern "C" fn post_start(json_in: *const c_char, json_out: *mut c_char) -> c_int {
     if json_in.is_null() {
         return write_error(json_out, 400100, "json_in is null");
     }
