@@ -1,6 +1,6 @@
 // src/utils/status.rs
 use std::process::Command;
-use std::path::{Path, PathBuf};
+use std::path::Path;
 use windows::core::{Error, HRESULT};
 use windows::Win32::System::ProcessStatus::{EnumProcesses, GetModuleBaseNameW};
 use windows::Win32::System::Threading::{OpenProcess, PROCESS_QUERY_INFORMATION, PROCESS_VM_READ};

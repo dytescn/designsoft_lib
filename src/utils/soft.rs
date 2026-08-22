@@ -2,7 +2,7 @@
 use std::collections::HashSet;
 use std::ffi::OsString;
 use std::os::windows::ffi::OsStringExt;
-use windows::core::{PCWSTR, PWSTR};
+use windows::core::{PCWSTR, PCSTR, PWSTR};
 use windows::Win32::Foundation::ERROR_NO_MORE_ITEMS;
 use windows::Win32::System::Registry::{
     RegCloseKey, RegEnumKeyExW, RegOpenKeyExW, RegQueryValueExW,
@@ -11,7 +11,10 @@ use windows::Win32::System::Registry::{
     REG_SAM_FLAGS, REG_VALUE_TYPE,
     REG_SZ, REG_EXPAND_SZ,
 };
+use windows::Win32::System::LibraryLoader::{GetModuleHandleW, GetProcAddress};
 
+
+// ---------- 辅助函数 ----------
 fn wide_to_string(wide: &[u16]) -> String {
     let null_pos = wide.iter().position(|&c| c == 0).unwrap_or(wide.len());
     OsString::from_wide(&wide[..null_pos])
@@ -45,7 +48,53 @@ fn query_reg_string(key: HKEY, value_name: &str) -> Option<String> {
     Some(wide_to_string(&data[..len]))
 }
 
-/// 内部搜索函数（遍历注册表子键）
+    // ---------- 动态调用 MSI API ----------
+    // ... 顶部导入不变
+
+    type MsiGetProductInfoWFunc = unsafe extern "system" fn(
+        sz_product: PCWSTR,
+        sz_property: PCWSTR,
+        lp_value_buf: *mut u16,
+        pcch_value_buf: *mut u32,
+    ) -> u32;
+
+    fn get_msi_product_version_dynamic(product_code: &str) -> Option<String> {
+        unsafe {
+            let module_name: Vec<u16> = "msi.dll\0".encode_utf16().collect();
+            let h_module = GetModuleHandleW(PCWSTR(module_name.as_ptr())).ok()?;
+            if h_module.is_invalid() {
+                return None;
+            }
+
+            let func_name = "MsiGetProductInfoW\0";
+            let proc_addr = GetProcAddress(h_module, PCSTR(func_name.as_ptr()));
+            let proc = proc_addr?;
+            if proc as usize == 0 {
+                return None;
+            }
+            let func: MsiGetProductInfoWFunc = std::mem::transmute(proc);
+
+            let product_wide: Vec<u16> = product_code.encode_utf16().chain(Some(0)).collect();
+            let property_wide: Vec<u16> = "ProductVersion\0".encode_utf16().collect();
+            let mut buffer = [0u16; 256];
+            let mut len = buffer.len() as u32;
+
+            let result = func(
+                PCWSTR(product_wide.as_ptr()),
+                PCWSTR(property_wide.as_ptr()),
+                buffer.as_mut_ptr(),
+                &mut len,
+            );
+
+            if result == 0 {
+                Some(wide_to_string(&buffer[..len as usize]))
+            } else {
+                None
+            }
+        }
+    }
+
+// ---------- 内部搜索函数 ----------
 fn search_subkey(
     root: HKEY,
     subkey: &str,
@@ -72,10 +121,10 @@ fn search_subkey(
 
     let mut index = 0u32;
     let mut name_buf = [0u16; 256];
-    let mut name_len; // 移除初始赋值
+    let mut name_len;
 
     loop {
-        name_len = name_buf.len() as u32; // 在循环开始时赋值
+        name_len = name_buf.len() as u32;
         let ret = unsafe {
             RegEnumKeyExW(
                 hkey,
@@ -116,13 +165,22 @@ fn search_subkey(
 
         if let Some(display_name) = query_reg_string(sub_hkey, "DisplayName") {
             if display_name.to_lowercase().contains(&keyword.to_lowercase()) {
-                let version = query_reg_string(sub_hkey, "DisplayVersion")
+                let mut version = query_reg_string(sub_hkey, "DisplayVersion")
                     .unwrap_or_else(|| "未知版本".to_string());
-                results.push((display_name, version));
+
+                if let Some(product_code) = query_reg_string(sub_hkey, "ProductCode") {
+                    if let Some(msi_ver) = get_msi_product_version_dynamic(&product_code) {
+                        if msi_ver.len() > version.len() {
+                            version = msi_ver;
+                        }
+                    }
+                }
+
+                // 只保留主版本号（第一个点之前）
+                let main_version = version.split('.').next().unwrap_or(&version).to_string();
+                results.push((display_name, main_version));
             }
         }
-
-        // 忽略 RegCloseKey 返回值
         unsafe { let _ = RegCloseKey(sub_hkey); };
         index += 1;
     }
@@ -131,7 +189,7 @@ fn search_subkey(
     results
 }
 
-/// 对外公开的查找函数：返回主程序（过滤掉子组件）
+// ---------- 公开函数 ----------
 pub fn find_software(keyword: &str) -> Vec<(String, String)> {
     let subkey = r"SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall";
     let mut all = Vec::new();
@@ -142,21 +200,15 @@ pub fn find_software(keyword: &str) -> Vec<(String, String)> {
 
     let unique: HashSet<_> = all.into_iter().collect();
     let mut results: Vec<_> = unique.into_iter().collect();
-
-    // 过滤掉子组件（名称中包含 " - " 的条目）
     results.retain(|(name, _)| !name.contains(" - "));
 
-    // 如果还有多个（不同版本），取版本号最长的（通常最完整）
     if results.len() > 1 {
         results.sort_by(|a, b| b.1.len().cmp(&a.1.len()));
         results.truncate(1);
     }
-
     results
 }
 
-/// 根据软件的完整 DisplayName 获取安装路径（InstallLocation），
-/// 如果 InstallLocation 不存在，尝试从 DisplayIcon 提取目录。
 pub fn get_install_path_by_name(display_name: &str) -> Option<String> {
     let subkey = r"SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall";
     let views = [
@@ -170,7 +222,6 @@ pub fn get_install_path_by_name(display_name: &str) -> Option<String> {
                 return Some(path);
             }
         }
-        // 如果 InstallLocation 不存在或为空，尝试 DisplayIcon
         if let Some(icon) = get_value_for_display_name(root, subkey, display_name, "DisplayIcon", flag) {
             let exe_path = icon.split(',').next().unwrap_or(&icon);
             if let Some(dir) = std::path::Path::new(exe_path).parent() {
@@ -181,7 +232,6 @@ pub fn get_install_path_by_name(display_name: &str) -> Option<String> {
     None
 }
 
-/// 获取软件的 DisplayIcon（可执行文件完整路径，可能包含逗号和参数）
 pub fn get_display_icon(display_name: &str) -> Option<String> {
     let subkey = r"SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall";
     let views = [
@@ -199,7 +249,6 @@ pub fn get_display_icon(display_name: &str) -> Option<String> {
     None
 }
 
-/// 内部辅助：在指定根键和子键下查找 DisplayName 完全匹配的子键，并读取指定值。
 fn get_value_for_display_name(
     root: HKEY,
     subkey: &str,
@@ -218,10 +267,10 @@ fn get_value_for_display_name(
 
     let mut index = 0u32;
     let mut name_buf = [0u16; 256];
-    let mut name_len; // 移除初始赋值
+    let mut name_len;
 
     loop {
-        name_len = name_buf.len() as u32; // 循环中赋值
+        name_len = name_buf.len() as u32;
         let ret = unsafe {
             RegEnumKeyExW(
                 hkey,
@@ -268,7 +317,6 @@ fn get_value_for_display_name(
     None
 }
 
-/// 返回所有匹配的主程序（过滤子组件）的列表，不去重，返回所有不同版本
 pub fn find_software_all(keyword: &str) -> Vec<(String, String)> {
     let subkey = r"SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall";
     let mut all = Vec::new();
@@ -277,14 +325,9 @@ pub fn find_software_all(keyword: &str) -> Vec<(String, String)> {
     all.extend(search_subkey(HKEY_LOCAL_MACHINE, subkey, keyword, KEY_WOW64_32KEY));
     all.extend(search_subkey(HKEY_CURRENT_USER, subkey, keyword, REG_SAM_FLAGS(0)));
 
-    // 去重（相同名称+版本）
     let unique: HashSet<_> = all.into_iter().collect();
     let mut results: Vec<_> = unique.into_iter().collect();
-
-    // 过滤掉子组件（名称中包含 " - " 的条目）
     results.retain(|(name, _)| !name.contains(" - "));
-
-    // 按名称排序，保证顺序稳定
     results.sort_by(|a, b| a.0.cmp(&b.0));
     results
 }

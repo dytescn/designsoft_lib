@@ -14,7 +14,8 @@ fn test_find_software_existing() {
         eprintln!("⚠️ CorelDRAW 未安装，跳过测试");
         return;
     }
-    assert_eq!(results.len(), 1);
+    println!("{:?}",results);
+    assert_eq!(results.len(), 1);    
     let (name, version) = &results[0];
     assert!(name.contains("CorelDRAW"));
     assert!(!version.is_empty());

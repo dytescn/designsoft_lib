@@ -21,10 +21,14 @@ uuid = { version = "1.23.2", features = ["v4"] }
 regex = "1"
 
 [dependencies.windows]
-version = "0.62.2"
+version = "0.62"
 features = [
     "Win32_System_Registry",   # 用于 soft 模块
     "Win32_Foundation",        # 用于错误码等
     "Win32_System_ProcessStatus",
     "Win32_System_Threading",
+   "Win32_Foundation",
+    "Win32_System_Registry",
+    "Win32_System_LibraryLoader",   # 新增
+
 ]
