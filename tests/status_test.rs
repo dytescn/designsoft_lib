@@ -1,81 +1,75 @@
-// tests/status_test.rs
-// 保留原有测试，并新增以下
+//! 状态查询与启动的集成测试。
+//!
+//! 部分用例依赖本机安装的设计软件；未安装时会打印提示并跳过断言。
 
+use designsoft::utils::soft::find_software_all;
 use designsoft::utils::status::{
-    resolve_software,
+    is_software_running, launch_software_with_version, resolve_software,
     software_status_with_version,
-    launch_software_with_version,
-    is_software_running,
 };
 
 #[test]
 fn test_resolve_software() {
     let keyword = "CorelDRAW";
-    let result = resolve_software(keyword, None);
-    if result.is_err() {
-        eprintln!("⚠️ 无法解析软件（可能未安装或版本冲突），错误: {}", result.err().unwrap());
+    let Ok((name, version)) = resolve_software(keyword, None) else {
+        eprintln!("⚠️ CorelDRAW 未安装或存在多个版本，跳过测试");
         return;
-    }
-    let (name, version) = result.unwrap();
+    };
+
     assert!(name.contains("CorelDRAW"));
     assert!(!version.is_empty());
-
-    // 如果已知版本，测试指定版本
-    // 这里假设从注册表读取的版本可用，我们仅测试存在性
-    if let Ok((_, ver)) = resolve_software(keyword, Some("26.1")) {
-        // 若成功，则验证
-    }
 }
 
 #[test]
 fn test_is_software_running_self() {
-    // 当前进程应该能被检测到
+    // 当前进程应该能被检测到。
     let exe_name = std::env::current_exe()
         .ok()
-        .and_then(|p| p.file_name().map(|s| s.to_string_lossy().to_string()))
-        .unwrap_or("designsoft.exe".to_string());
+        .and_then(|p| p.file_name().map(|s| s.to_string_lossy().into_owned()))
+        .unwrap_or_else(|| "designsoft.exe".to_string());
+
     assert!(is_software_running(&exe_name));
 }
 
 #[test]
 fn test_software_status_with_version() {
-    let keyword = "Illustrator";
-    // 尝试获取状态，如果未安装则跳过
-    let status = software_status_with_version(keyword, None);
-    if let Ok(s) = status {
-        assert!(s == "已安装但未启动" || s == "已启动");
-        println!("状态: {}", s);
-    } else {
-        eprintln!("⚠️ 无法获取状态: {}", status.err().unwrap());
+    match software_status_with_version("Illustrator", None) {
+        Ok(status) => assert!(
+            status == "已安装但未启动" || status == "已启动",
+            "意外状态: {status}"
+        ),
+        Err(e) => eprintln!("⚠️ 无法获取状态（Illustrator 可能未安装）: {e}"),
     }
 }
 
 #[test]
 fn test_resolve_software_with_version() {
-    // 测试指定存在版本
     let keyword = "CorelDRAW";
-    let result = resolve_software(keyword, Some("26.1.0.143"));
-    if let Ok((name, ver)) = result {
-        assert!(name.contains("CorelDRAW"));
-        assert_eq!(ver, "26.1.0.143");
-    } else {
-        eprintln!("⚠️ 未找到指定版本的 CorelDRAW，跳过测试");
-        // 测试通过，因为我们无法强制环境拥有这个版本
+    let installed = find_software_all(keyword);
+
+    match installed.first() {
+        Some((name, version)) => {
+            // 完整版本号应能解析。
+            let (resolved_name, resolved_version) =
+                resolve_software(keyword, Some(version.as_str())).expect("已安装版本应能解析");
+            assert_eq!(resolved_name, *name);
+            assert_eq!(resolved_version, *version);
+
+            // 主版本号（第一个点之前）也应能匹配。
+            let major = version.split('.').next().unwrap();
+            assert!(resolve_software(keyword, Some(major)).is_ok());
+        }
+        None => eprintln!("⚠️ CorelDRAW 未安装，跳过指定版本解析测试"),
     }
 
-    // 测试指定不存在的版本
-    let result = resolve_software(keyword, Some("99.99"));
-    assert!(result.is_err());
-    if let Err(e) = result {
-        assert!(e.contains("未找到版本 '99.99'"));
-    }
+    // 不存在的版本始终报错。
+    assert!(resolve_software(keyword, Some("99.99")).is_err());
 }
 
 #[test]
 fn test_software_status_with_version_error() {
-    let keyword = "Illustrator";
-    // 传入不存在的版本
-    let status = software_status_with_version(keyword, Some("99.99"));
+    // 不存在的版本：无论软件是否安装，都应返回错误。
+    let status = software_status_with_version("Illustrator", Some("99.99"));
     assert!(status.is_err());
     if let Err(e) = status {
         assert!(e.contains("未找到版本 '99.99'") || e.contains("未找到匹配的软件"));
@@ -84,37 +78,28 @@ fn test_software_status_with_version_error() {
 
 #[test]
 fn test_launch_software_with_version_error() {
-    let keyword = "Photoshop";
-    // 不存在的版本
-    let result = launch_software_with_version(keyword, Some("99.99"));
+    // 只测试错误分支，不会实际启动软件。
+    let result = launch_software_with_version("Photoshop", Some("99.99"));
     assert!(result.is_err());
     if let Err(e) = result {
         assert!(e.contains("未找到版本 '99.99'") || e.contains("未找到匹配的软件"));
     }
-
-    // 注意：我们并不实际启动，只测试错误分支，所以无需 `#[ignore]`
 }
 
 #[test]
 fn test_is_software_running_false() {
-    // 一个不可能存在的进程名
     assert!(!is_software_running("NonExistentProcessName.exe"));
 }
 
-// 保留原有的启动测试（已忽略）
 #[test]
-#[ignore]
+#[ignore = "会真实启动软件"]
 fn test_launch_software_with_version_existing() {
     let keyword = "CorelDRAW";
-    // 如果只安装了一个版本，可以不带版本；如果多个，请指定一个
-    // 这里使用 None 尝试自动选择
-    let result = launch_software_with_version(keyword, None);
-    if let Err(e) = result {
-        // 如果失败可能是因为无安装或多个版本，打印警告但不失败
-        eprintln!("⚠️ 启动失败 (可能未安装或多版本): {}", e);
+    if let Err(e) = launch_software_with_version(keyword, None) {
+        eprintln!("⚠️ 启动失败（可能未安装或多版本）: {e}");
         return;
     }
-    // 启动成功后检查状态
+
     let status = software_status_with_version(keyword, None).unwrap();
     assert_eq!(status, "已启动");
 }

@@ -1,111 +1,139 @@
-// src/utils/data.rs
+//! 根据软件显示名称推断可能的可执行文件名。
+//!
+//! 已知软件使用内置映射，未知软件按 DisplayName 套用通用规则。
+
+use std::sync::LazyLock;
+
 use regex::Regex;
 
-/// 根据软件的显示名称（DisplayName）生成可能的可执行文件名列表
+/// 匹配四位年份（如 2025）。
+static YEAR_PATTERN: LazyLock<Regex> =
+    LazyLock::new(|| Regex::new(r"\b20\d{2}\b").expect("内置年份正则表达式始终合法"));
+
+/// 只有落在此范围内的数字才会被当作版本年份。
+fn is_valid_year(year: u32) -> bool {
+    (2015..=2030).contains(&year)
+}
+
+/// 已知软件的可执行文件名映射。
+///
+/// `year_executables` 中的 `{}` 会替换为年份（如 `Illustrator 2025.exe`）。
+struct KnownSoftware {
+    /// 用于匹配 DisplayName 的关键字（不区分大小写）。
+    keywords: &'static [&'static str],
+    /// 与年份无关的可执行文件名。
+    executables: &'static [&'static str],
+    /// 带年份的可执行文件名模板。
+    year_executables: &'static [&'static str],
+}
+
+const KNOWN_SOFTWARE: &[KnownSoftware] = &[
+    KnownSoftware {
+        keywords: &["illustrator"],
+        executables: &["Illustrator.exe", "Adobe Illustrator.exe", "AI.exe"],
+        year_executables: &["Illustrator {}.exe", "Adobe Illustrator {}.exe"],
+    },
+    KnownSoftware {
+        keywords: &["photoshop"],
+        executables: &["Photoshop.exe", "Adobe Photoshop.exe", "PS.exe"],
+        year_executables: &["Photoshop {}.exe", "Adobe Photoshop {}.exe"],
+    },
+    KnownSoftware {
+        keywords: &["coreldraw"],
+        executables: &["CorelDRAW.exe", "CorelDRW.exe"],
+        year_executables: &["CorelDRAW {}.exe", "CorelDRW {}.exe"],
+    },
+    KnownSoftware {
+        keywords: &["autocad"],
+        executables: &["acad.exe", "AutoCAD.exe"],
+        year_executables: &["AutoCAD {}.exe", "acad{}.exe"],
+    },
+    KnownSoftware {
+        keywords: &["cinema 4d", "c4d"],
+        executables: &["Cinema 4D.exe", "C4D.exe", "Cinema4D.exe"],
+        year_executables: &["Cinema 4D {}.exe"],
+    },
+    KnownSoftware {
+        keywords: &["sketchup"],
+        executables: &["SketchUp.exe"],
+        year_executables: &["SketchUp {}.exe"],
+    },
+    KnownSoftware {
+        keywords: &["blender"],
+        executables: &["blender.exe"],
+        // Blender 的安装路径通常不含年份。
+        year_executables: &[],
+    },
+    KnownSoftware {
+        keywords: &["3ds max", "3dsmax"],
+        executables: &["3dsmax.exe", "3ds Max.exe"],
+        year_executables: &["3dsmax{}.exe"],
+    },
+];
+
+/// 根据软件的显示名称（DisplayName）生成可能的可执行文件名列表。
 pub fn get_candidate_exe_names(display_name: &str) -> Vec<String> {
     let lower = display_name.to_lowercase();
-    let mut names: Vec<String> = Vec::new();
-
-    // 提取显示名称中的年份（四位数字，如 2025）
     let year = extract_year(display_name);
 
-    // 已知软件映射（按需扩展）
-    if lower.contains("illustrator") {
-        names.extend(vec![
-            "Illustrator.exe".to_string(),
-            "Adobe Illustrator.exe".to_string(),
-            "AI.exe".to_string(),
-        ]);
-        if let Some(y) = year {
-            names.push(format!("Illustrator {}.exe", y));
-            names.push(format!("Adobe Illustrator {}.exe", y));
-        }
-    } else if lower.contains("photoshop") {
-        names.extend(vec![
-            "Photoshop.exe".to_string(),
-            "Adobe Photoshop.exe".to_string(),
-            "PS.exe".to_string(),
-        ]);
-        if let Some(y) = year {
-            names.push(format!("Photoshop {}.exe", y));
-            names.push(format!("Adobe Photoshop {}.exe", y));
-        }
-    } else if lower.contains("coreldraw") {
-        names.extend(vec![
-            "CorelDRAW.exe".to_string(),
-            "CorelDRW.exe".to_string(),
-        ]);
-        if let Some(y) = year {
-            names.push(format!("CorelDRAW {}.exe", y));
-            names.push(format!("CorelDRW {}.exe", y));
-        }
-    } else if lower.contains("autocad") {
-        names.extend(vec![
-            "acad.exe".to_string(),
-            "AutoCAD.exe".to_string(),
-        ]);
-        if let Some(y) = year {
-            names.push(format!("AutoCAD {}.exe", y));
-            names.push(format!("acad{}.exe", y));
-        }
-    } else if lower.contains("cinema 4d") || lower.contains("c4d") {
-        names.extend(vec![
-            "Cinema 4D.exe".to_string(),
-            "C4D.exe".to_string(),
-            "Cinema4D.exe".to_string(),
-        ]);
-        if let Some(y) = year {
-            names.push(format!("Cinema 4D {}.exe", y));
-        }
-    } else if lower.contains("sketchup") {
-        names.push("SketchUp.exe".to_string());
-        if let Some(y) = year {
-            names.push(format!("SketchUp {}.exe", y));
-        }
-    } else if lower.contains("blender") {
-        names.push("blender.exe".to_string());
-        // Blender 通常不包含年份
-    } else if lower.contains("3ds max") || lower.contains("3dsmax") {
-        names.extend(vec![
-            "3dsmax.exe".to_string(),
-            "3ds Max.exe".to_string(),
-        ]);
-        if let Some(y) = year {
-            names.push(format!("3dsmax{}.exe", y));
-        }
-    } else {
-        // 通用逻辑：尝试从显示名称中推测
-        let parts: Vec<&str> = display_name.split_whitespace().collect();
-        if !parts.is_empty() {
-            names.push(format!("{}.exe", parts[0]));
-            names.push(format!("{}.exe", display_name.replace(" ", "")));
-            if lower.contains("adobe") && !lower.contains("illustrator") && !lower.contains("photoshop") {
-                names.push(format!("Adobe{}.exe", display_name.replace(" ", "")));
-            }
-            if let Some(y) = year {
-                names.push(format!("{}{}.exe", parts[0], y));
-                names.push(format!("{}_{}.exe", parts[0], y));
-            }
-        }
-    }
+    let mut names = match KNOWN_SOFTWARE.iter().find(|software| {
+        software
+            .keywords
+            .iter()
+            .any(|keyword| lower.contains(keyword))
+    }) {
+        Some(software) => known_candidates(software, year),
+        None => generic_candidates(display_name, year),
+    };
 
-    // 去重
     names.sort();
     names.dedup();
     names
 }
 
-/// 从显示名称中提取年份（四位数字，范围 2015–2030），返回 Option<u32>
-fn extract_year(display_name: &str) -> Option<u32> {
-    let re = Regex::new(r"\b(20[1-9][0-9]|20[0-9]{2})\b").unwrap();
-    for cap in re.captures_iter(display_name) {
-        if let Some(m) = cap.get(1) {
-            if let Ok(y) = m.as_str().parse::<u32>() {
-                if y >= 2015 && y <= 2030 {
-                    return Some(y);
-                }
-            }
-        }
+fn known_candidates(software: &KnownSoftware, year: Option<u32>) -> Vec<String> {
+    let mut names: Vec<String> = software
+        .executables
+        .iter()
+        .map(|name| (*name).to_string())
+        .collect();
+
+    if let Some(year) = year {
+        names.extend(
+            software
+                .year_executables
+                .iter()
+                .map(|template| template.replace("{}", &year.to_string())),
+        );
     }
-    None
+
+    names
+}
+
+/// 未知软件的通用规则：按首个单词、压缩空格后的全名和年份组合猜测。
+fn generic_candidates(display_name: &str, year: Option<u32>) -> Vec<String> {
+    let Some(first_word) = display_name.split_whitespace().next() else {
+        return Vec::new();
+    };
+    let compact = display_name.replace(' ', "");
+
+    let mut names = vec![format!("{first_word}.exe"), format!("{compact}.exe")];
+
+    if display_name.to_lowercase().contains("adobe") {
+        names.push(format!("Adobe{compact}.exe"));
+    }
+    if let Some(year) = year {
+        names.push(format!("{first_word}{year}.exe"));
+        names.push(format!("{first_word}_{year}.exe"));
+    }
+
+    names
+}
+
+/// 从显示名称中提取版本年份，返回 `2015..=2030` 范围内的第一个四位数字。
+fn extract_year(display_name: &str) -> Option<u32> {
+    YEAR_PATTERN
+        .find_iter(display_name)
+        .filter_map(|m| m.as_str().parse::<u32>().ok())
+        .find(|year| is_valid_year(*year))
 }

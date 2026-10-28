@@ -1,10 +1,10 @@
 {
-  "name": "designsoft",
+  "name": "designsoft_lib",
   "version": "1.0.2",
-  "description": "designsoft for soft management",
-  "keywords": ["designsoft", "management"],
+  "description": "designsoft_lib for soft management",
+  "keywords": ["designsoft_lib", "management"],
   "author": "funxdata",
-  "type": "sys",
+  "type": "design_soft",
   "exports": {
       "./target/release/designsoft.dll":"designsoft.dll"
   }

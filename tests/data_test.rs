@@ -1,4 +1,7 @@
-// tests/data_test.rs
+//! 可执行文件名推断的单元测试。
+
+#![cfg(windows)]
+
 use designsoft::utils::data::get_candidate_exe_names;
 
 #[test]

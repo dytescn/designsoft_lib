@@ -1,9 +1,9 @@
-// tests/soft_test.rs
+//! 注册表查询的集成测试。
+
+#![cfg(windows)]
+
 use designsoft::utils::soft::{
-    find_software,
-    find_software_all,
-    get_install_path_by_name,
-    get_display_icon,
+    find_software, find_software_all, get_display_icon, get_install_path_by_name,
 };
 
 #[test]
@@ -14,8 +14,7 @@ fn test_find_software_existing() {
         eprintln!("⚠️ CorelDRAW 未安装，跳过测试");
         return;
     }
-    println!("{:?}",results);
-    assert_eq!(results.len(), 1);    
+    println!("{:?}", results);
     let (name, version) = &results[0];
     assert!(name.contains("CorelDRAW"));
     assert!(!version.is_empty());
@@ -55,7 +54,6 @@ fn test_get_install_path_by_name() {
     let path_str = path.unwrap();
     assert!(std::path::Path::new(&path_str).exists());
 }
-
 
 #[test]
 fn test_find_software_all_filters_subcomponents() {

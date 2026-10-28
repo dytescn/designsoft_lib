@@ -1,4 +1,7 @@
-// tests/status_integration_test.rs
+//! 状态查询链路的集成测试。
+
+#![cfg(windows)]
+
 use designsoft::utils::status::{resolve_software, software_status_with_version};
 
 #[test]

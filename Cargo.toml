@@ -1,34 +1,33 @@
 [package]
 name = "designsoft"
-version = "0.1.0"
+version = "1.0.2"
 edition = "2021"
+description = "Detect, inspect and launch design software installed on Windows."
+license = "MIT"
 
-# 核心：指定编译为 动态库 + C ABI 兼容
+# 编译为动态库（供外部系统通过 C ABI 调用），同时保留 rlib 以便测试。
 [lib]
-crate-type = ["cdylib", "rlib"]   # 或者 ["cdylib", "lib"]（lib 会生成 rlib 和 dylib）
-name = "designsoft"  
+crate-type = ["cdylib", "rlib"]
+name = "designsoft"
 
 [dependencies]
-chrono = "0.4.45"
-flate2 = "1.1.9"
-# 跨语言类型安全（推荐必装）
-libc = "0.2"             # C 基础类型
-once_cell = "1.19"       # 全局初始化
-serde = { version = "1.0", features = ["derive"] }
-serde_derive = "1.0"
-serde_json = "1.0"
-uuid = { version = "1.23.2", features = ["v4"] }
+aws-config = { version = "1", features = ["behavior-version-latest"] }
+aws-credential-types = "1"
+aws-sdk-s3 = "1"
+cdrsdk = "1.0.0"
 regex = "1"
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+tokio = { version = "1", features = ["rt", "time"] }
 
-[dependencies.windows]
-version = "0.62"
-features = [
-    "Win32_System_Registry",   # 用于 soft 模块
-    "Win32_Foundation",        # 用于错误码等
+# 本库仅支持 Windows：依赖注册表、进程与 MSI 相关 API。
+[target.'cfg(windows)'.dependencies]
+windows = { version = "0.62", features = [
+    "Win32_Foundation",
+    "Win32_System_Com",
+    "Win32_System_LibraryLoader",
     "Win32_System_ProcessStatus",
-    "Win32_System_Threading",
-   "Win32_Foundation",
     "Win32_System_Registry",
-    "Win32_System_LibraryLoader",   # 新增
-
-]
+    "Win32_System_Threading",
+    "Win32_UI_WindowsAndMessaging",
+] }
