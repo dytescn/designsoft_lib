@@ -56,20 +56,18 @@ design_soft/
 ```rust
 use designsoft::utils::pkg;
 
-let version = pkg::lookup("vectorcraft-cli")?;   // 读 design_soft/packages.json
-let opened = pkg::open("vectorcraft-cli")?;      // 必要时下载到 ./designsoft 并启动
+let version = pkg::lookup("vectorcraft-cli")?;   // 读本地已安装版本
+let opened = pkg::open("vectorcraft-cli")?;      // 调用 dytes 安装到 apps/<name> 并启动
 ```
 
 客户端约定：
 
-- `packages.json` 的 `packages.<name>` 必须与 `design_soft/<name>/dytes.json` 的
-  `version` 一致，否则拒绝打开；
+- 打开时调用 `dytes install design-soft <name> --dir <root> --json`，由 dytes 负责
+  索引校验、下载、安装与 `dytes.lock`；`designsoft` 不再直接访问 S3；
 - `exports` 的导出目标（右侧文件名）只支持单层文件名（不能带 `/` 或 `\`），
   且至少有一个 `.exe` 作为启动入口；左侧源路径只在发布端使用，客户端不读取；
-- 存在 `platform-exports` 时按平台取子表，对象路径为
-  `design_soft/<name>/<version>/<platform>/<目标文件名>`，否则为
-  `design_soft/<name>/<version>/<目标文件名>`；
-- 下载文件与 `versions.json` 记录在客户端当前工作目录的 `designsoft/` 下。
+- 安装目录统一为 `<root>/apps/<name>/`，清单为 `apps/<name>/dytes.json`；
+- `pkg::status` 只读本地清单与进程，不访问网络。
 
 ## 产物建议
 
@@ -81,6 +79,5 @@ let opened = pkg::open("vectorcraft-cli")?;      // 必要时下载到 ./designs
 ## 注意
 
 - `publish` 当前没有 `--dry-run`，测试发布会写入真实 S3；
-- `update` 端尚未支持 `design_soft` 依赖，安装联动见
-  [`sys/install/publish_todo.md`](../../../dytes_sys_operations/sys/install/publish_todo.md)；
-- 安装目录与注册流程尚未定义，发布前需先确定。
+- `dytes update` 已支持 `design_soft` 依赖，安装与更新共用 `dytes`；
+- 安装目录为 `apps/<name>/`，清单 `dytes.json` 随包保存。

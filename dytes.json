@@ -1,11 +1,12 @@
 {
   "name": "designsoft_lib",
-  "version": "1.0.2",
+  "version": "1.0.3",
   "description": "designsoft_lib for soft management",
   "keywords": ["designsoft_lib", "management"],
   "author": "funxdata",
   "type": "design_soft",
   "exports": {
-      "./target/release/designsoft.dll":"designsoft.dll"
+      "./target/release/designsoft.dll":"designsoft.dll",
+      "./docs/mcp.md":"mcp.md"
   }
 }

@@ -9,7 +9,7 @@
 | FFI 接口 | 说明 |
 | --- | --- |
 | `post_info` | 按关键字列出已安装软件的名称、版本与安装路径 |
-| `post_start` | 启动指定软件（可指定版本），已在运行时直接返回成功；按路由表选择 COM、线上包下载或本地 exe 启动 |
+| `post_start` | 启动指定软件（可指定版本），已在运行时直接返回成功；按路由表选择 COM、dytes 安装包或本地 exe 启动 |
 | `post_status` | 查询软件状态：`已启动` / `已安装但未启动` |
 
 数据来源为注册表 `SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall` 的 64 位、32 位与当前用户三个视图；版本号优先取 MSI 的 `ProductVersion`，其次取 `DisplayVersion`。
@@ -37,7 +37,7 @@ AppEntry {
 ```
 
 - `Installed` 是默认方式：按注册表安装信息解析可执行文件并启动；
-- `Package` 的版本由线上 `design_soft/packages.json` 决定，请求里的 `version` 会被忽略；
+- `Package` 的版本由 dytes 决定（`dytes install design-soft` / `dytes update`），请求里的 `version` 会被忽略；
   包内同时提供 GUI 与 CLI 时，默认启动 GUI，可用 `entry = "cli"` 启动命令行入口；
 - 未命中路由表的关键字仍按 `Installed` 处理，任意已安装软件都可以启动。
 
@@ -76,7 +76,7 @@ cdr::close_with_default_timeout(None)?;
 - 只对 `CdrSession` 调用 `set_visible(true)` 时，最后一个 COM 客户端断开后 CorelDRAW 会重新隐藏窗口。
 - CorelDRAW 的 `version` 属性可能带本地化前缀（如 `版本 26.1.0.143`），判断版本请优先用 `version_major`。
 
-## 线上设计软件包（Rust API）
+## 设计软件包（Rust API）
 
 `utils::pkg` 用于按名称打开托管在 `design_soft/` 发布目录中的便携软件包
 （发布规则见 [`docs/soft.md`](docs/soft.md)）。它通过 `post_start` / `post_status`
@@ -85,10 +85,10 @@ cdr::close_with_default_timeout(None)?;
 ```rust
 use designsoft::utils::pkg::{self, Entry};
 
-// 查询线上包版本；包不存在时返回 Ok(None)
+// 查询本地已安装版本；未安装时返回 Ok(None)
 let version = pkg::lookup("vectorcraft")?;
 
-// 打开：线上没有该包直接报错；本地缺失或版本落后时先下载再启动
+// 打开：调用 dytes 确保已安装 / 已更新，再启动本地入口
 let opened = pkg::open("vectorcraft")?;
 println!("{} {} {} -> {}", opened.name, opened.version, opened.entry.as_str(), opened.exe_path.display());
 
@@ -104,16 +104,13 @@ for entry in &status.entries {
 
 行为：
 
-- 先读取线上 `design_soft/packages.json`，并校验 `design_soft/<name>/dytes.json` 的
-  `version` 与索引一致；
-- 本地目录默认是当前工作目录下的 `designsoft/`（`pkg::open_in` / `pkg::status_in`
-  可指定其它目录），版本记录保存在 `designsoft/versions.json`；
-- 本地版本一致且入口文件存在时直接启动；否则按 `exports` / `platform-exports`
-  下载导出文件后启动，下载中途失败会清理本次已写入的文件；
+- 打开前调用 `dytes install design-soft <name> --dir <root> --json`，由 dytes 负责
+  版本比较、下载、安装与 `dytes.lock`；本库不再直接访问 S3；
+- 本地目录固定为 `<root>/apps/<name>/`，清单 `apps/<name>/dytes.json` 由 dytes 保存；
+  `pkg::open_in` / `pkg::status_in` 的第二个参数是安装根目录；
 - 入口按文件名区分：`<name>-cli.exe` 为 CLI，其余 `.exe` 为 GUI；省略入口时
   GUI 优先，包只有 CLI 时回退 CLI；
-- `status` 未下载时返回错误，文件缺失时返回错误，否则返回默认入口状态与
-  `entries` 明细；
+- `status` 只读本地清单与进程，不访问网络；未安装或文件缺失时返回错误；
 - 仅支持便携包：导出目标（`exports` 右侧的文件名）必须是单层文件名，且至少一个
   `.exe`；目录需先打包。
 
@@ -193,7 +190,7 @@ cargo fmt --check
 成功响应：`{ "code": 200, "data": { "message": "软件已启动或已在运行" }, "msg": "started" }`。
 
 关键字匹配到多个版本且未指定 `version` 时返回 `500200`，错误信息会列出可选版本。
-打开方式由[软件路由表](#软件路由表)决定：CorelDRAW 走 COM，VectorCraft 走线上包下载，
+打开方式由[软件路由表](#软件路由表)决定：CorelDRAW 走 COM，VectorCraft 走 dytes 安装，
 其余（含未命中路由表的关键字）走注册表 + 本地 exe。
 
 ### `post_status`
@@ -204,8 +201,8 @@ cargo fmt --check
 { "code": 200, "data": { "status": "已启动" }, "msg": "success" }
 ```
 
-`OpenMethod::Package`（如 VectorCraft）只检查本地 `designsoft/versions.json` 与进程：
-未下载或文件缺失时返回 `500200`；其余软件按注册表安装信息检测。
+`OpenMethod::Package`（如 VectorCraft）只检查本地 `apps/<name>/dytes.json` 与进程：
+未安装或文件缺失时返回 `500200`；其余软件按注册表安装信息检测。
 
 ## 目录结构
 
@@ -218,11 +215,12 @@ src/
     start.rs          post_start
     status.rs         post_status
   utils/
-    apps.rs           设计软件路由表（COM / 线上包 / 本地 exe）
+    apps.rs           设计软件路由表（COM / dytes 包 / 本地 exe）
     cdr.rs            CorelDRAW COM 接口（cdrsdk）
     cjson.rs          C 缓冲区 JSON 输出
     data.rs           可执行文件名推断
-    pkg.rs            线上 design_soft 包查询与下载启动
+    dytes.rs          dytes 可执行文件查找与调用
+    pkg.rs            design_soft 包启动（dytes 安装）
     soft.rs           注册表查询
     status.rs         进程检测与启动
 ```
